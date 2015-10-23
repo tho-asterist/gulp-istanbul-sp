@@ -2,7 +2,7 @@
 
 var through = require('through2').obj;
 var path = require('path');
-var istanbul = require('istanbul');
+var istanbul = require('istanbul-sp');
 var gutil = require('gulp-util');
 var _ = require('lodash');
 var Report = istanbul.Report;
@@ -10,10 +10,11 @@ var Collector = istanbul.Collector;
 var PluginError = gutil.PluginError;
 var checker = require('istanbul-threshold-checker');
 
-var PLUGIN_NAME = 'gulp-istanbul';
+var PLUGIN_NAME = 'gulp-istanbul-sp';
 var COVERAGE_VARIABLE = '$$cov_' + new Date().getTime() + '$$';
 
-var plugin = module.exports = function (opts) {
+var coverageScope = {},
+  plugin = module.exports = function (opts) {
   opts = opts || {};
   _.defaults(opts, {
     coverageVariable: COVERAGE_VARIABLE,
@@ -51,6 +52,8 @@ var plugin = module.exports = function (opts) {
           var covStub = JSON.parse(covStubMatch[0]);
           global[opts.coverageVariable] = global[opts.coverageVariable] || {};
           global[opts.coverageVariable][path.resolve(file.path)] = covStub;
+
+          coverageScope[opts.coverageVariable] = global[opts.coverageVariable];
         }
       }
 
@@ -73,6 +76,83 @@ plugin.hookRequire = function (options) {
     // If the file is already required, delete it from the cache otherwise the covered
     // version will be ignored.
     delete require.cache[path.resolve(file.path)];
+    fileMap[file.path] = file.contents.toString();
+    return cb();
+  });
+};
+
+plugin.hookCreateScript = function (options) {
+  var fileMap = {};
+
+  istanbul.hook.unhookCreateScript();
+  istanbul.hook.hookCreateScript(function (path) {
+    return !!fileMap[path];
+  }, function (code, path) {
+    return fileMap[path];
+  }, options);
+
+  return through(function (file, enc, cb) {
+    fileMap[file.path] = file.contents.toString();
+    return cb();
+  });
+};
+
+plugin.hookRunInThisContext = function (options) {
+  var fileMap = {};
+
+  istanbul.hook.unhookRunInThisContext();
+  istanbul.hook.hookRunInThisContext(function (path) {
+    return !!fileMap[path];
+  }, function (code, path) {
+    return fileMap[path];
+  }, options);
+
+  return through(function (file, enc, cb) {
+    fileMap[file.path] = file.contents.toString();
+    return cb();
+  });
+};
+
+plugin.hookRunInContext = function (options) {
+  var fileMap = {};
+
+  if (!options) {
+    options = {injectScope: coverageScope};
+  } else {
+    options.injectScope = coverageScope;
+  }
+
+  istanbul.hook.unhookRunInContext();
+  istanbul.hook.hookRunInContext(function (path) {
+    return !!fileMap[path];
+  }, function (code, path) {
+    console.log(code);
+    return fileMap[path];
+  }, options);
+
+  return through(function (file, enc, cb) {
+    fileMap[file.path] = file.contents.toString();
+    return cb();
+  });
+};
+
+plugin.hookRunInNewContext = function (options) {
+  var fileMap = {};
+
+  if (!options) {
+    options = {injectScope: coverageScope};
+  } else {
+    options.injectScope = coverageScope;
+  }
+
+  istanbul.hook.unhookRunInNewContext();
+  istanbul.hook.hookRunInNewContext(function (path) {
+    return !!fileMap[path];
+  }, function (code, path) {
+    return fileMap[path];
+  }, options);
+
+  return through(function (file, enc, cb) {
     fileMap[file.path] = file.contents.toString();
     return cb();
   });
